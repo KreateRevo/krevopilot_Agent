@@ -1,0 +1,166 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "krevopilot-agent.fullname" . }}
+  labels:
+    {{- include "krevopilot-agent.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      {{- include "krevopilot-agent.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "krevopilot-agent.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        # Roll the pod when the agent key changes. The key reaches the container through
+        # a Secret read with secretKeyRef, so issuing a new key changes the Secret but not
+        # this Deployment spec. Kubernetes then leaves the running pod alone and the agent
+        # keeps presenting the previous key and failing with 401 until someone restarts it
+        # by hand. Only the key is hashed, not the rendered Secret: that template also
+        # generates a random hash salt, which would make the checksum differ on every
+        # render and restart the agent for no reason.
+        checksum/agent-key: {{ .Values.agent.key | default "" | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "krevopilot-agent.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.priorityClassName }}
+      priorityClassName: {{ .Values.priorityClassName | quote }}
+      {{- end }}
+      containers:
+        - name: agent
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}{{- if .Values.image.digest }}@{{ .Values.image.digest }}{{- end }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: PLATFORM_URL
+              value: {{ required "platform.url is required" .Values.platform.url | quote }}
+            - name: CLUSTER_ID
+              value: {{ required "cluster.id is required" .Values.cluster.id | quote }}
+            - name: HELM_CHART_VERSION
+              value: {{ .Chart.Version | quote }}
+            - name: HELM_RELEASE_NAME
+              value: {{ .Release.Name | quote }}
+            - name: HELM_RELEASE_NAMESPACE
+              value: {{ .Release.Namespace | quote }}
+            - name: AGENT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "krevopilot-agent.secretName" . }}
+                  key: agent-key
+            - name: HASH_SALT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "krevopilot-agent.secretName" . }}
+                  key: hash-salt
+            - name: INTERVAL_SECONDS
+              value: {{ .Values.agent.intervalSeconds | quote }}
+            - name: COMMAND_POLL_SECONDS
+              value: {{ .Values.agent.commandPollSeconds | default 5 | quote }}
+            - name: MAX_PODS
+              value: {{ .Values.agent.maxPods | quote }}
+            - name: MAX_EVENTS
+              value: {{ .Values.agent.maxEvents | quote }}
+            - name: VERIFY_TLS
+              value: {{ .Values.agent.verifyTls | quote }}
+            - name: ALLOW_INSECURE_HTTP
+              value: {{ .Values.agent.allowInsecureHttp | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.agent.logLevel | quote }}
+            - name: PRESERVE_NAMESPACES
+              value: {{ .Values.agent.preserveNamespaces | quote }}
+            - name: EVENT_MESSAGE_MODE
+              value: {{ .Values.agent.eventMessageMode | quote }}
+            - name: LOGS_ENABLED
+              value: {{ default false (get (default dict .Values.logs) "enabled") | quote }}
+            - name: LOGS_MAX_LINES
+              value: {{ default 500 (get (default dict .Values.logs) "maxLines") | quote }}
+            - name: LOGS_MAX_LOOKBACK_MINUTES
+              value: {{ default 60 (get (default dict .Values.logs) "maxLookbackMinutes") | quote }}
+            - name: LOGS_INCLUDE_PREVIOUS
+              value: {{ include "krevopilot-agent.bool" (list .Values.logs "includePrevious" true) | quote }}
+            - name: LOGS_MASK_EMAILS
+              value: {{ include "krevopilot-agent.bool" (list (get (default dict .Values.logs) "redact") "maskEmails" true) | quote }}
+            - name: LOGS_MASK_PUBLIC_IPS
+              value: {{ include "krevopilot-agent.bool" (list (get (default dict .Values.logs) "redact") "maskPublicIPs" true) | quote }}
+            - name: LOGS_MASK_INTERNAL_IPS
+              value: {{ default false (get (default dict (get (default dict .Values.logs) "redact")) "maskInternalIPs") | quote }}
+            - name: LOG_STORAGE_MODE
+              value: {{ default "none" (get (default dict .Values.logs) "storageMode") | quote }}
+            - name: EXTERNAL_LOG_SOURCE
+              {{- with .Values.externalLogSource }}
+              value: {{ .type | default "none" | quote }}
+              {{- else }}
+              value: "none"
+              {{- end }}
+            - name: EXTERNAL_LOG_SOURCE_URL
+              {{- with .Values.externalLogSource }}
+              value: {{ .url | default "" | quote }}
+              {{- else }}
+              value: ""
+              {{- end }}
+            - name: EXTERNAL_LOG_SOURCE_TENANT_ID
+              {{- with .Values.externalLogSource }}
+              value: {{ .tenantId | default "" | quote }}
+              {{- else }}
+              value: ""
+              {{- end }}
+            - name: EXTERNAL_LOG_SOURCE_TIMEOUT_SECONDS
+              {{- with .Values.externalLogSource }}
+              value: {{ .timeoutSeconds | default 10 | quote }}
+              {{- else }}
+              value: "10"
+              {{- end }}
+            - name: MANIFESTS_ENABLED
+              value: {{ include "krevopilot-agent.bool" (list .Values.manifests "enabled" true) | quote }}
+            - name: MAX_MANIFESTS
+              value: {{ default 80 (get (default dict .Values.manifests) "maxItems") | quote }}
+            - name: MANIFEST_MAX_YAML_CHARS
+              value: {{ default 12000 (get (default dict .Values.manifests) "maxYamlChars") | quote }}
+            - name: MANIFEST_SECRET_METADATA
+              value: {{ include "krevopilot-agent.bool" (list .Values.manifests "secretMetadata" true) | quote }}
+            - name: MANIFEST_CONFIGMAP_VALUES
+              value: {{ include "krevopilot-agent.bool" (list .Values.manifests "configMapValues" false) | quote }}
+            - name: REDACT_OBJECT_NAMES
+              value: {{ if eq (include "krevopilot-agent.bool" (list .Values.manifests "realObjectNames" true)) "true" }}"false"{{ else }}"true"{{ end }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: {{ .Values.tmpVolume.sizeLimit | quote }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

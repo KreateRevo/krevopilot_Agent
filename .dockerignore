@@ -1,0 +1,10 @@
+.git
+.github
+README.md
+examples
+scripts/*
+!scripts/verify_release.py
+*.zip
+__pycache__
+*.pyc
+.pytest_cache

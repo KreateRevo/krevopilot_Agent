@@ -1,0 +1,130 @@
+replicaCount: 1
+
+image:
+  repository: mani7022/krevopilot-agent
+  tag: "2.0.25"
+  # Optional immutable image digest, for example sha256:...
+  digest: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+platform:
+  # KreateRevoPilot URL, for example https://pilot.yourcompany.com
+  url: ""
+
+cluster:
+  # Friendly customer cluster name, for example acme-prod-us-east
+  id: ""
+
+agent:
+  # Cluster connection key generated in KreateRevoPilot.
+  key: ""
+  # Optional. If empty, Helm creates or reuses a random salt in the Secret.
+  hashSalt: ""
+  # Use an existing Secret with keys: agent-key, hash-salt.
+  existingSecret: ""
+  intervalSeconds: 60
+  # How often the agent checks for on-demand commands such as live pod logs
+  # between normal cluster snapshots. Lower is faster; 5s is a good UX default.
+  commandPollSeconds: 5
+  maxPods: 150
+  maxEvents: 60
+  verifyTls: true
+  allowInsecureHttp: false
+  logLevel: INFO
+  # true keeps namespace names readable in Pilot. false aliases namespaces too.
+  preserveNamespaces: true
+  # scrubbed keeps redacted event context for investigations.
+  # summary sends reason/kind only. none sends no event message text.
+  eventMessageMode: scrubbed
+
+logs:
+  # Enables future on-demand log requests. Regular snapshots still do not send logs.
+  enabled: false
+  maxLines: 500
+  maxLookbackMinutes: 60
+  includePrevious: true
+  storageMode: none # none | sanitized_evidence | customer_storage
+  redact:
+    maskEmails: true
+    maskPublicIPs: true
+    # Keep internal cluster IPs by default because they help debugging.
+    maskInternalIPs: false
+
+externalLogSource:
+  # none means fetch live pod logs through the Kubernetes API.
+  # loki means the agent queries a customer-owned Loki service from inside the cluster.
+  type: none # none | kubernetes | loki | opensearch | splunk | datadog
+  # Example for an in-cluster Loki gateway:
+  # http://loki-gateway.observability.svc.cluster.local
+  url: ""
+  tenantId: ""
+  timeoutSeconds: 10
+  existingSecret: ""
+
+manifests:
+  # Sends redacted Kubernetes resource specs for investigation. This is read-only.
+  enabled: true
+  maxItems: 80
+  maxYamlChars: 12000
+  # Secret values are never collected. This only sends Secret metadata/type/key counts.
+  secretMetadata: true
+  # Keep false for production privacy. When false, ConfigMaps send key names only.
+  configMapValues: false
+  # Object names (Deployment, Service, ConfigMap names) are sent as real names so your engineers
+  # get commands they can actually run, such as "kubectl edit deployment payment-gateway".
+  # Set to false to receive hmac-sha256 aliases instead. Secret and ConfigMap *values* are never
+  # sent either way, and pod, container and node names stay aliased regardless of this setting.
+  realObjectNames: true
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+rbac:
+  create: true
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  capabilities:
+    drop:
+      - ALL
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 96Mi
+  limits:
+    cpu: 250m
+    memory: 256Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+priorityClassName: ""
+
+tmpVolume:
+  sizeLimit: 16Mi
+
+networkPolicy:
+  enabled: false
+  # Kubernetes NetworkPolicy cannot restrict by URL. Add CIDR blocks for your
+  # KrevoPilot endpoint and DNS if your CNI enforces egress policies.
+  egressCidrs: []
+  allowDns: true

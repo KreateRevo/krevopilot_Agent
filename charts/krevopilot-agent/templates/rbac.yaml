@@ -1,0 +1,78 @@
+{{- if .Values.rbac.create -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "krevopilot-agent.fullname" . }}-readonly
+  labels:
+    {{- include "krevopilot-agent.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "events", "nodes", "namespaces"]
+    verbs: ["get", "list"]
+  {{- if .Values.logs.enabled }}
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  {{- end }}
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods", "nodes"]
+    verbs: ["get", "list"]
+  - apiGroups: ["apps"]
+    resources:
+      - replicasets
+    verbs: ["get", "list"]
+  {{- if .Values.manifests.enabled }}
+  - apiGroups: [""]
+    resources:
+      - configmaps
+      - secrets
+      - services
+      - endpoints
+      - persistentvolumeclaims
+      - persistentvolumes
+    verbs: ["get", "list"]
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - statefulsets
+      - daemonsets
+    verbs: ["get", "list"]
+  - apiGroups: ["batch"]
+    resources:
+      - jobs
+      - cronjobs
+    verbs: ["get", "list"]
+  - apiGroups: ["autoscaling"]
+    resources:
+      - horizontalpodautoscalers
+    verbs: ["get", "list"]
+  - apiGroups: ["networking.k8s.io"]
+    resources:
+      - ingresses
+      - networkpolicies
+    verbs: ["get", "list"]
+  - apiGroups: ["storage.k8s.io"]
+    resources:
+      - storageclasses
+    verbs: ["get", "list"]
+  - apiGroups: ["route.openshift.io"]
+    resources:
+      - routes
+    verbs: ["get", "list"]
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "krevopilot-agent.fullname" . }}-readonly
+  labels:
+    {{- include "krevopilot-agent.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "krevopilot-agent.fullname" . }}-readonly
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "krevopilot-agent.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

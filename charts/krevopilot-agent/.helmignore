@@ -1,0 +1,6 @@
+.git/
+.github/
+*.zip
+__pycache__/
+*.pyc
+.pytest_cache/
