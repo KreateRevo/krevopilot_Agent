@@ -1,0 +1,29 @@
+apiVersion: v1
+entries:
+  krevopilot-agent:
+  - annotations:
+      artifacthub.io/category: monitoring-logging
+      artifacthub.io/license: Proprietary
+    apiVersion: v2
+    appVersion: 2.0.25
+    created: "2026-08-04T16:13:33.066124856Z"
+    description: KreateRevoPilot Agent for Kubernetes cluster health and workload
+      signals
+    digest: 436270748505db053bd9839f23a1f3f8b8870a0b4b79b6d0d6cb3a7bb948c8ed
+    home: https://github.com/KreateRevo/krevopilot_Agent
+    keywords:
+    - kubernetes
+    - agent
+    - observability
+    - gitops
+    - kreate-revo
+    maintainers:
+    - name: KreateRevo
+    name: krevopilot-agent
+    sources:
+    - https://github.com/KreateRevo/krevopilot_Agent
+    type: application
+    urls:
+    - https://KreateRevo.github.io/krevopilot_Agent/krevopilot-agent-0.1.25.tgz
+    version: 0.1.25
+generated: "2026-08-04T16:13:33.065233195Z"
