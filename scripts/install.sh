@@ -6,7 +6,7 @@ set -eu
 : "${AGENT_KEY:?Set AGENT_KEY from KreateRevoPilot}"
 
 NAMESPACE="${NAMESPACE:-krevopilot-system}"
-IMAGE="${IMAGE:-mani7022/krevopilot-agent:2.0.30}"
+IMAGE="${IMAGE:-mani7022/krevopilot-agent:2.0.31}"
 MANIFEST_URL="${MANIFEST_URL:-https://raw.githubusercontent.com/KreateRevo/krevopilot-agent/main/kubernetes.yaml}"
 ALLOW_INSECURE_HTTP="${ALLOW_INSECURE_HTTP:-false}"
 
