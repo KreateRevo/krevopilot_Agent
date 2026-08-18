@@ -2,7 +2,7 @@ replicaCount: 1
 
 image:
   repository: mani7022/krevopilot-agent
-  tag: "2.0.29"
+  tag: "2.0.30"
   # Optional immutable image digest, for example sha256:...
   digest: ""
   pullPolicy: IfNotPresent

@@ -12,7 +12,7 @@ from kubernetes.config.config_exception import ConfigException
 from privacy import alias_identifier, sanitize_value, scrub_log_text, scrub_text
 
 logger = logging.getLogger("krevopilot.collector")
-AGENT_VERSION = "2.0.29"
+AGENT_VERSION = "2.0.30"
 HELM_CHART_VERSION = os.getenv("HELM_CHART_VERSION", "").strip()
 HELM_RELEASE_NAME = os.getenv("HELM_RELEASE_NAME", "").strip()
 HELM_RELEASE_NAMESPACE = os.getenv("HELM_RELEASE_NAMESPACE", "").strip()
@@ -283,7 +283,11 @@ class ClusterCollector:
             "helm_release_namespace": HELM_RELEASE_NAMESPACE or None,
             "collected_at": datetime.now(timezone.utc).isoformat(),
             "collection_policy": {
-                "identifiers": "namespace names preserved" if self.preserve_namespaces else "namespace, pod, node, workload, container, and object names use hmac-sha256 aliases",
+                "identifiers": (
+                    "namespace and application controller names preserved; pod, node, container, and object names follow the configured identifier policy"
+                    if self.preserve_namespaces else
+                    "application controller names preserved; namespace, pod, node, container, and object names follow the configured identifier policy"
+                ),
                 "event_message_mode": self.event_message_mode,
                 "logs_collected": False,
                 "logs_on_demand_enabled": self.logs_enabled,
@@ -451,6 +455,10 @@ class ClusterCollector:
 
             pod_record = {
                 "workload": self.object_name("workload", owner_name, alias_key=f"{metadata.namespace}/{owner_kind}/{owner_name}"),
+                # Keep the correlation identity in `workload`, and always provide the real
+                # Kubernetes controller name separately for human-facing product surfaces.
+                # This is object metadata, never a Secret or ConfigMap value.
+                "workload_display_name": str(owner_name),
                 "workload_kind": owner_kind,
                 "workload_uid": owner_uid,
                 "namespace": namespace_value,

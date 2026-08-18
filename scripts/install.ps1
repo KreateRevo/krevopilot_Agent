@@ -9,7 +9,7 @@ param(
   [string]$AgentKey,
 
   [string]$HashSalt = "",
-  [string]$Image = "mani7022/krevopilot-agent:2.0.29",
+  [string]$Image = "mani7022/krevopilot-agent:2.0.30",
   [string]$Namespace = "krevopilot-system",
   [string]$ManifestUrl = "https://raw.githubusercontent.com/KreateRevo/krevopilot-agent/main/kubernetes.yaml",
   [switch]$AllowInsecureHttp

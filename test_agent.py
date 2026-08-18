@@ -274,7 +274,8 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual(signals["pods"][0]["containers"][0]["reason"], "CrashLoopBackOff")
         self.assertEqual(signals["pods"][0]["namespace"], "production")
         self.assertEqual(signals["warning_events"][0]["namespace"], "production")
-        self.assertNotIn("customer-api", str(signals))
+        self.assertEqual(signals["pods"][0]["workload_display_name"], "customer-api-7d9")
+        self.assertNotEqual(signals["pods"][0]["pod"], "customer-api-7d9-x1")
         self.assertNotIn("10.0.0.9", str(signals))
         self.assertFalse(signals["metrics"]["available"])
         self.assertGreater(redactions, 0)
@@ -551,6 +552,7 @@ class CollectorTests(unittest.TestCase):
             self.collector.alias("workload", "production/ReplicaSet/customer-api-7d9"),
         )
         self.assertEqual(pod["workload_uid"], "pod-uid-123")
+        self.assertEqual(pod["workload_display_name"], "customer-api-7d9")
 
     def test_aliased_mode_does_not_change_payload_shape_for_bridge(self):
         self.collector.manifest_real_names = False
@@ -567,6 +569,7 @@ class CollectorTests(unittest.TestCase):
 
         pod = signals["pods"][0]
         self.assertEqual(pod["workload_kind"], "Deployment")
+        self.assertEqual(pod["workload_display_name"], "customer-api")
         self.assertEqual(pod["workload_uid"], "deployment-uid-456")
         self.assertEqual(pod["immediate_owner_kind"], "ReplicaSet")
         self.assertIn("immediate_owner_name", pod)
@@ -579,6 +582,7 @@ class CollectorTests(unittest.TestCase):
 
         pod = signals["pods"][0]
         self.assertEqual(pod["workload_kind"], "ReplicaSet")
+        self.assertEqual(pod["workload_display_name"], "customer-api-7d9")
         self.assertNotIn("immediate_owner_kind", pod)
 
     def test_replicaset_lookup_failure_degrades_gracefully(self):
