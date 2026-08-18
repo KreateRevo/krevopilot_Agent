@@ -7,7 +7,10 @@ metadata:
     {{- include "krevopilot-agent.labels" . | nindent 4 }}
 rules:
   - apiGroups: [""]
-    resources: ["pods", "events", "nodes", "namespaces"]
+    # services is needed for platform-component detection (Loki, Prometheus, Argo CD, ingress
+    # controllers), which is independent of manifest collection - it must not sit behind the
+    # manifests flag, or turning manifests off silently disables detection.
+    resources: ["pods", "events", "nodes", "namespaces", "services"]
     verbs: ["get", "list"]
   {{- if .Values.logs.enabled }}
   - apiGroups: [""]
@@ -26,7 +29,6 @@ rules:
     resources:
       - configmaps
       - secrets
-      - services
       - endpoints
       - persistentvolumeclaims
       - persistentvolumes
@@ -50,6 +52,10 @@ rules:
     resources:
       - ingresses
       - networkpolicies
+    verbs: ["get", "list"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources:
+      - endpointslices
     verbs: ["get", "list"]
   - apiGroups: ["storage.k8s.io"]
     resources:

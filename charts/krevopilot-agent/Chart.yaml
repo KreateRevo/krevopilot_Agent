@@ -2,8 +2,8 @@ apiVersion: v2
 name: krevopilot-agent
 description: KreateRevoPilot Agent for Kubernetes cluster health and workload signals
 type: application
-version: 0.1.25
-appVersion: "2.0.25"
+version: 0.1.29
+appVersion: "2.0.29"
 home: https://github.com/KreateRevo/krevopilot_Agent
 sources:
   - https://github.com/KreateRevo/krevopilot_Agent

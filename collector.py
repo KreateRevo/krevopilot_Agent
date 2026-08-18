@@ -12,7 +12,7 @@ from kubernetes.config.config_exception import ConfigException
 from privacy import alias_identifier, sanitize_value, scrub_log_text, scrub_text
 
 logger = logging.getLogger("krevopilot.collector")
-AGENT_VERSION = "2.0.25"
+AGENT_VERSION = "2.0.29"
 HELM_CHART_VERSION = os.getenv("HELM_CHART_VERSION", "").strip()
 HELM_RELEASE_NAME = os.getenv("HELM_RELEASE_NAME", "").strip()
 HELM_RELEASE_NAMESPACE = os.getenv("HELM_RELEASE_NAMESPACE", "").strip()
@@ -225,6 +225,7 @@ class ClusterCollector:
         self.autoscaling = client.AutoscalingV1Api()
         self.batch = client.BatchV1Api()
         self.networking = client.NetworkingV1Api()
+        self.discovery = client.DiscoveryV1Api()
         self.storage_api = client.StorageV1Api()
         self.metrics = client.CustomObjectsApi()
         self.pod_lookup: dict[str, dict[str, Any]] = {}
@@ -236,6 +237,21 @@ class ClusterCollector:
         namespace = value or "default"
         return namespace if self.preserve_namespaces else self.alias("namespace", namespace)
 
+    def object_name(self, kind: str, value: str | None, *, alias_key: str | None = None) -> str:
+        """The real Kubernetes name, unless the customer asked for aliases.
+
+        Manifests already honoured manifest_real_names while the pod stream aliased everything
+        unconditionally. Because Optimize and the workload tables are built from the pod stream,
+        every workload displayed as "privacy alias" no matter how the agent was configured, and
+        no setting could turn it off. Both streams now go through this one switch.
+
+        alias_key preserves the composite alias input (namespace/Kind/name) so aliased mode keeps
+        producing exactly the identifiers the platform already stores.
+        """
+        if self.manifest_real_names:
+            return str(value or "")
+        return self.alias(kind, alias_key if alias_key is not None else value)
+
     def collect(self) -> tuple[dict[str, Any], int]:
         redactions = 0
         self.pod_lookup = {}
@@ -246,7 +262,9 @@ class ClusterCollector:
         nodes = self._collect_nodes(raw_nodes)
         platform = self._detect_platform(raw_nodes)
         metrics = self._collect_metrics()
-        manifests, manifest_redactions = self._collect_manifests() if self.manifests_enabled else ([], 0)
+        manifests, manifest_redactions = self._collect_manifests(pods) if self.manifests_enabled else ([], 0)
+        environment = self._collect_environment()
+        external_log_status = self._external_log_status()
         redactions += pod_redactions + event_redactions + manifest_redactions
 
         signals = {
@@ -263,6 +281,9 @@ class ClusterCollector:
                 "log_storage_mode": self.log_storage_mode,
                 "external_log_source": self.external_log_source,
                 "external_log_source_configured": bool(self.external_log_source_url) if self.external_log_source != "none" else False,
+                "external_log_source_status": external_log_status["status"],
+                "external_log_source_reason": external_log_status.get("reason"),
+                "historical_logs_available": external_log_status["status"] == "available",
                 "log_redaction": {
                     "tokens_passwords_and_keys": "always masked",
                     "emails_masked": self.log_mask_emails,
@@ -287,6 +308,13 @@ class ClusterCollector:
                     "max_yaml_chars_per_item": self.manifest_max_yaml_chars,
                 },
             },
+            "capabilities": [
+                "stable_object_identity",
+                "correlated_warning_events",
+                "workload_manifests",
+                "container_status",
+                "resource_metrics",
+            ],
             "summary": {
                 "pods_observed": len(pods),
                 "warning_events_observed": len(events),
@@ -295,6 +323,7 @@ class ClusterCollector:
                 "manifests_observed": len(manifests),
             },
             "platform": platform,
+            "environment": environment,
             "pods": pods,
             "warning_events": events,
             "nodes": nodes,
@@ -369,7 +398,7 @@ class ClusterCollector:
                 requests = getattr(container.resources, "requests", None) or {}
                 limits = getattr(container.resources, "limits", None) or {}
                 resources.append({
-                    "container": self.alias("container", container.name),
+                    "container": self.object_name("container", container.name),
                     "requests": {"cpu": requests.get("cpu"), "memory": requests.get("memory")},
                     "limits": {"cpu": limits.get("cpu"), "memory": limits.get("memory")},
                 })
@@ -380,8 +409,15 @@ class ClusterCollector:
                 for item in (status.conditions or [])
             ]
             namespace_value = self.namespace(metadata.namespace)
-            pod_alias = self.alias("pod", metadata.name)
-            container_lookup = {self.alias("container", item.name): item.name for item in (spec.containers or [])}
+            pod_alias = self.object_name("pod", metadata.name)
+            # Commands from an older platform snapshot may still carry privacy aliases after a
+            # customer enables real object names. Index both forms during the transition so log
+            # retrieval remains usable across an agent upgrade.
+            legacy_pod_alias = self.alias("pod", metadata.name)
+            container_lookup: dict[str, str] = {}
+            for item in (spec.containers or []):
+                container_lookup[self.object_name("container", item.name)] = item.name
+                container_lookup[self.alias("container", item.name)] = item.name
             # Namespace is part of a Kubernetes pod's identity. Keep every
             # namespace/pod pair so an identical pod name in another namespace
             # can never replace the selected target in the on-demand log index.
@@ -389,7 +425,7 @@ class ClusterCollector:
                 "namespace": metadata.namespace,
                 "namespace_alias": namespace_value,
                 "pod": metadata.name,
-                "pod_alias": pod_alias,
+                "pod_alias": legacy_pod_alias,
                 "containers": container_lookup,
             }
             labels_raw = dict(getattr(metadata, "labels", None) or {})
@@ -402,11 +438,11 @@ class ClusterCollector:
             }
 
             pod_record = {
-                "workload": self.alias("workload", f"{metadata.namespace}/{owner_kind}/{owner_name}"),
+                "workload": self.object_name("workload", owner_name, alias_key=f"{metadata.namespace}/{owner_kind}/{owner_name}"),
                 "workload_kind": owner_kind,
                 "namespace": namespace_value,
                 "pod": pod_alias,
-                "node": self.alias("node", spec.node_name),
+                "node": self.object_name("node", spec.node_name),
                 "phase": status.phase,
                 "started_at": status.start_time.isoformat() if status.start_time else None,
                 "containers": containers,
@@ -433,10 +469,15 @@ class ClusterCollector:
                 pod_record["revision_annotations"] = revision_annotations
             if immediate_owner_kind and immediate_owner_name:
                 pod_record["immediate_owner_kind"] = immediate_owner_kind
-                pod_record["immediate_owner_name"] = self.alias("workload", f"{metadata.namespace}/{immediate_owner_kind}/{immediate_owner_name}")
+                pod_record["immediate_owner_name"] = self.object_name(
+                    "workload", immediate_owner_name,
+                    alias_key=f"{metadata.namespace}/{immediate_owner_kind}/{immediate_owner_name}",
+                )
 
             result.append(pod_record)
-            redactions += 4
+            # Only count identifiers that were actually replaced, so the redaction total the
+            # customer sees stays truthful when names ship in the clear.
+            redactions += 0 if self.manifest_real_names else 4
         return result, redactions
 
     def _extract_container_entry(self, container_status: Any, spec_container: Any = None) -> dict[str, Any]:
@@ -449,7 +490,7 @@ class ClusterCollector:
             else {}
         )
         return {
-            "container": self.alias("container", container_status.name),
+            "container": self.object_name("container", container_status.name),
             "ready": bool(container_status.ready),
             "started": bool(getattr(container_status, "started", False)),
             "restarts": int(container_status.restart_count or 0),
@@ -529,7 +570,12 @@ class ClusterCollector:
         return {"state": "unknown"}
 
     def _collect_events(self) -> tuple[list[dict[str, Any]], int]:
-        items = self.core.list_event_for_all_namespaces(watch=False, limit=self.max_events).items
+        # Kubernetes applies ``limit`` before the client can sort. Asking for only N arbitrary
+        # rows meant a busy cluster could hide its newest warning events behind older Normal
+        # events. Fetch the collection, sort warnings by occurrence time, then apply our bounded
+        # payload limit. The API response remains metadata-sized and the outbound snapshot is
+        # still capped by max_events.
+        items = self.core.list_event_for_all_namespaces(watch=False).items
         warnings = [item for item in items if item.type == "Warning"]
         warnings.sort(key=lambda item: self._event_time(item) or "", reverse=True)
         result = []
@@ -563,21 +609,21 @@ class ClusterCollector:
         if not kind or not name:
             return None
         if kind == "Pod":
-            return self.alias("pod", name)
+            return self.object_name("pod", name)
         if kind == "Node":
-            return self.alias("node", name)
+            return self.object_name("node", name)
         if kind in {"ReplicaSet", "Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob"}:
-            return self.alias("workload", f"{namespace}/{kind}/{name}")
+            return self.object_name("workload", name, alias_key=f"{namespace}/{kind}/{name}")
         if kind == "PersistentVolumeClaim":
-            return self.alias("pvc", name)
+            return self.object_name("pvc", name)
         if kind == "Namespace":
             return self.namespace(name)
         if kind == "Service":
-            return self.alias("service", name)
+            return self.object_name("service", name)
         if kind == "Ingress":
-            return self.alias("ingress", name)
+            return self.object_name("ingress", name)
         if kind == "HorizontalPodAutoscaler":
-            return self.alias("hpa", name)
+            return self.object_name("hpa", name)
         return None
 
     @staticmethod
@@ -648,7 +694,7 @@ class ClusterCollector:
             allocatable = node.status.allocatable or {}
             info = node.status.node_info
             result.append({
-                "node": self.alias("node", node.metadata.name),
+                "node": self.object_name("node", node.metadata.name),
                 "ready": conditions.get("Ready") == "True",
                 "pressure": {
                     "memory": conditions.get("MemoryPressure") == "True",
@@ -777,11 +823,11 @@ class ClusterCollector:
         for pod in pod_metrics.get("items", [])[: self.max_pods]:
             metadata = pod.get("metadata", {})
             pods.append({
-                "pod": self.alias("pod", metadata.get("name")),
+                "pod": self.object_name("pod", metadata.get("name")),
                 "namespace": self.namespace(metadata.get("namespace")),
                 "containers": [
                     {
-                        "container": self.alias("container", item.get("name")),
+                        "container": self.object_name("container", item.get("name")),
                         "cpu": item.get("usage", {}).get("cpu"),
                         "memory": item.get("usage", {}).get("memory"),
                     }
@@ -790,7 +836,7 @@ class ClusterCollector:
             })
         nodes = [
             {
-                "node": self.alias("node", item.get("metadata", {}).get("name")),
+                "node": self.object_name("node", item.get("metadata", {}).get("name")),
                 "cpu": item.get("usage", {}).get("cpu"),
                 "memory": item.get("usage", {}).get("memory"),
             }
@@ -798,7 +844,90 @@ class ClusterCollector:
         ]
         return {"available": True, "pods": pods, "nodes": nodes}
 
-    def _collect_manifests(self) -> tuple[list[dict[str, Any]], int]:
+    # Well-known platform components, matched against Service names and the standard
+    # app.kubernetes.io labels. Order does not decide a winner: every pattern a name matches
+    # is recorded, so "grafana-loki" reports Grafana *and* Loki rather than whichever pattern
+    # happens to be listed first.
+    _KNOWN_COMPONENTS = (
+        ("argocd", "Argo CD (GitOps)"),
+        ("argo-cd", "Argo CD (GitOps)"),
+        ("flux", "Flux (GitOps)"),
+        ("ingress-nginx", "NGINX Ingress Controller"),
+        ("nginx-ingress", "NGINX Ingress Controller"),
+        ("traefik", "Traefik Ingress Controller"),
+        ("haproxy-ingress", "HAProxy Ingress Controller"),
+        ("istio", "Istio Service Mesh"),
+        ("kong", "Kong Gateway"),
+        ("contour", "Contour Ingress Controller"),
+        ("router-default", "OpenShift Router"),
+        ("cert-manager", "cert-manager"),
+        ("external-dns", "ExternalDNS"),
+        ("external-secrets", "External Secrets Operator"),
+        ("prometheus", "Prometheus"),
+        ("alertmanager", "Alertmanager"),
+        ("grafana", "Grafana"),
+        ("loki", "Loki"),
+        ("metrics-server", "Kubernetes Metrics Server"),
+        ("postgres-operator", "Zalando Postgres Operator"),
+        ("strimzi", "Strimzi Kafka Operator"),
+        ("rabbitmq-cluster-operator", "RabbitMQ Cluster Operator"),
+        ("velero", "Velero"),
+        ("keda", "KEDA"),
+        ("kyverno", "Kyverno"),
+        ("gatekeeper", "OPA Gatekeeper"),
+    )
+
+    def _collect_environment(self) -> dict[str, Any]:
+        """Which well-known platform components actually run in this cluster.
+
+        Detection reads Services rather than workloads because charts routinely give the
+        Deployment a generic name ("logs-gateway") while the Service keeps the stable product
+        name and the standard app.kubernetes.io labels. Names and labels are read raw, before
+        aliasing, so privacy settings cannot manufacture a false negative.
+
+        component_scan reports whether the scan actually ran. Without it the platform cannot
+        tell "this cluster has no Loki" apart from "the agent was never allowed to look" - both
+        reached the customer as "not detected", which is only true in one of those cases.
+        """
+        components: list[dict[str, str]] = []
+        seen_components: set[str] = set()
+        services_scanned = False
+        services_scan_reason: str | None = None
+        try:
+            for service in self.core.list_service_for_all_namespaces(watch=False).items:
+                metadata = service.metadata
+                labels = metadata.labels or {}
+                candidates = " ".join(str(value) for value in (
+                    metadata.name,
+                    labels.get("app.kubernetes.io/name"),
+                    labels.get("app.kubernetes.io/instance"),
+                    labels.get("app"),
+                ) if value).lower()
+                for pattern, label in self._KNOWN_COMPONENTS:
+                    if pattern in candidates and label not in seen_components:
+                        seen_components.add(label)
+                        components.append({
+                            "component": label,
+                            "namespace": self.namespace(metadata.namespace),
+                            "workload": self.object_name("service", metadata.name),
+                            "detected_from": "Service",
+                        })
+            services_scanned = True
+        except Exception as exc:
+            services_scan_reason = type(exc).__name__
+            logger.info("Service API unavailable for component detection: %s", services_scan_reason)
+
+        return {
+            "detected_components": components,
+            # Compatibility alias for older platform versions.
+            "components": components,
+            "component_scan": {
+                "services_scanned": services_scanned,
+                "reason": services_scan_reason,
+            },
+        }
+
+    def _collect_manifests(self, pods: list[dict[str, Any]] | None = None) -> tuple[list[dict[str, Any]], int]:
         """Collect safe, redacted resource specs for AI investigation.
 
         This intentionally does not read Secret values or ConfigMap values by
@@ -810,10 +939,10 @@ class ClusterCollector:
             ("Deployment", lambda: self.apps.list_deployment_for_all_namespaces(watch=False, limit=self.max_manifests).items),
             ("StatefulSet", lambda: self.apps.list_stateful_set_for_all_namespaces(watch=False, limit=self.max_manifests).items),
             ("DaemonSet", lambda: self.apps.list_daemon_set_for_all_namespaces(watch=False, limit=self.max_manifests).items),
-            ("ReplicaSet", lambda: self.apps.list_replica_set_for_all_namespaces(watch=False, limit=self.max_manifests).items),
             ("Job", lambda: self.batch.list_job_for_all_namespaces(watch=False, limit=self.max_manifests).items),
             ("CronJob", lambda: self.batch.list_cron_job_for_all_namespaces(watch=False, limit=self.max_manifests).items),
             ("Service", lambda: self.core.list_service_for_all_namespaces(watch=False, limit=self.max_manifests).items),
+            ("EndpointSlice", lambda: self.discovery.list_endpoint_slice_for_all_namespaces(watch=False, limit=self.max_manifests).items),
             ("Ingress", lambda: self.networking.list_ingress_for_all_namespaces(watch=False, limit=self.max_manifests).items),
             ("NetworkPolicy", lambda: self.networking.list_network_policy_for_all_namespaces(watch=False, limit=self.max_manifests).items),
             ("PersistentVolumeClaim", lambda: self.core.list_persistent_volume_claim_for_all_namespaces(watch=False, limit=self.max_manifests).items),
@@ -825,23 +954,64 @@ class ClusterCollector:
         if self.manifest_secret_metadata:
             collectors.append(("Secret", lambda: self.core.list_secret_for_all_namespaces(watch=False, limit=self.max_manifests).items))
 
-        result: list[dict[str, Any]] = []
+        buckets: list[list[tuple[dict[str, Any], int]]] = []
         redactions = 0
         for kind, loader in collectors:
-            if len(result) >= self.max_manifests:
-                break
             try:
                 items = loader()
             except Exception as exc:
                 logger.info("Manifest collector skipped %s: %s", kind, type(exc).__name__)
                 continue
+            bucket: list[tuple[dict[str, Any], int]] = []
             for obj in items:
-                if len(result) >= self.max_manifests:
-                    break
                 item, item_redactions = self._manifest_item(kind, obj)
                 if item:
-                    result.append(item)
-                    redactions += item_redactions
+                    bucket.append((item, item_redactions))
+            if bucket:
+                buckets.append(bucket)
+
+        pod_rows = pods or []
+        priority_refs = {
+            (pod.get("namespace"), pod.get("workload"))
+            for pod in pod_rows
+            if pod.get("phase") not in {"Running", "Succeeded"}
+            or not (pod.get("containers") or [])
+            or any(not container.get("ready") for container in (pod.get("containers") or []))
+        }
+        priority_namespaces = {namespace for namespace, _workload in priority_refs if namespace}
+        dependency_kinds = {"Service", "EndpointSlice", "NetworkPolicy", "PersistentVolumeClaim", "ConfigMap", "Secret"}
+
+        selected: list[tuple[dict[str, Any], int]] = []
+        remaining: list[list[tuple[dict[str, Any], int]]] = []
+        for bucket in buckets:
+            rest = []
+            for entry in bucket:
+                item = entry[0]
+                relevant = (
+                    (item.get("namespace"), item.get("workload_ref")) in priority_refs
+                    or (item.get("namespace") in priority_namespaces and item.get("kind") in dependency_kinds)
+                )
+                if relevant and len(selected) < self.max_manifests:
+                    selected.append(entry)
+                else:
+                    rest.append(entry)
+            if rest:
+                remaining.append(rest)
+
+        # Deterministic round-robin fair share. A cluster with 80 Deployments can no longer
+        # consume the whole payload before Service/network/storage collectors get one slot.
+        index = 0
+        while len(selected) < self.max_manifests and remaining:
+            bucket = remaining[index % len(remaining)]
+            selected.append(bucket.pop(0))
+            if not bucket:
+                remaining.remove(bucket)
+                index = 0
+            else:
+                index += 1
+
+        result = [item for item, _count in selected]
+        redactions = sum(count for _item, count in selected)
         return result, redactions
 
     def _manifest_item(self, kind: str, obj: Any) -> tuple[dict[str, Any] | None, int]:
@@ -886,10 +1056,10 @@ class ClusterCollector:
         if kind in {"Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "Job", "CronJob"}:
             item["workload"] = safe_name
             item["workload_kind"] = kind
-            # Pods carry an aliased owner reference built as alias("workload", "ns/Kind/name").
-            # Ship the identical alias so a manifest can be matched to the pod it belongs to,
-            # whether or not the display name above is a real name.
-            item["workload_ref"] = self.alias("workload", f"{namespace}/{kind}/{name}")
+            # Must stay byte-identical to the pod stream's "workload" field so a manifest can be
+            # matched to the pod it belongs to. Both sides go through object_name, so they agree
+            # in real-name mode and in aliased mode alike.
+            item["workload_ref"] = self.object_name("workload", name, alias_key=f"{namespace}/{kind}/{name}")
         # The owner lets the platform walk ReplicaSet -> Deployment, which is the object an
         # engineer actually edits: a change to the ReplicaSet is reverted by its Deployment.
         owner = self._manifest_owner(metadata)
@@ -907,7 +1077,7 @@ class ClusterCollector:
             return {
                 "kind": kind,
                 "name": self._manifest_name(str(kind).lower(), name),
-                "workload_ref": self.alias("workload", f"{namespace}/{kind}/{name}"),
+                "workload_ref": self.object_name("workload", name, alias_key=f"{namespace}/{kind}/{name}"),
             }
         return None
 
@@ -1092,8 +1262,8 @@ class ClusterCollector:
         )
         return {
             "namespace": self.namespace(resolved["namespace"]),
-            "pod": self.alias("pod", resolved["pod"]),
-            "container": self.alias("container", resolved["container"]) if resolved["container"] else None,
+            "pod": self.object_name("pod", resolved["pod"]),
+            "container": self.object_name("container", resolved["container"]) if resolved["container"] else None,
             "previous": previous,
             "tail_lines": safe_tail,
             "since_seconds": safe_since,
@@ -1102,6 +1272,29 @@ class ClusterCollector:
             "logs": cleaned,
             "redacted": redactions > 0,
         }, redactions
+
+    def _external_log_status(self) -> dict[str, Any]:
+        """Whether historical log queries will actually work - not merely whether someone set
+        the flags. "Configured" and "reachable" are different answers with different fixes, so
+        the platform is given both instead of inferring one from the other.
+
+        The failure reason deliberately omits the endpoint itself: a customer-supplied URL can
+        carry embedded credentials, and this value is stored with the snapshot.
+        """
+        if self.external_log_source != "loki":
+            return {"status": "not_configured", "reason": "not configured"}
+        if not self.external_log_source_url:
+            return {"status": "unavailable", "reason": "Loki URL is missing"}
+        try:
+            response = requests.get(
+                urljoin(self.external_log_source_url + "/", "loki/api/v1/labels"),
+                headers=self._loki_headers(),
+                timeout=(3, self.external_log_source_timeout_seconds),
+            )
+            response.raise_for_status()
+        except Exception as exc:
+            return {"status": "unavailable", "reason": f"{type(exc).__name__} while probing the configured Loki endpoint"}
+        return {"status": "available", "reason": None}
 
     def _fetch_loki_logs(
         self,

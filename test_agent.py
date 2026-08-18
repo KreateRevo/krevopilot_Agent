@@ -202,7 +202,10 @@ class DeliveryTests(unittest.TestCase):
 
 class CollectorTests(unittest.TestCase):
     def setUp(self):
-        self.collector = ClusterCollector(b"0123456789abcdef", max_pods=10, max_events=10, manifests_enabled=False)
+        self.collector = ClusterCollector(
+            b"0123456789abcdef", max_pods=10, max_events=10,
+            manifests_enabled=False, manifest_real_names=False,
+        )
         waiting = ns(reason="CrashLoopBackOff", exit_code=None, finished_at=None)
         state = ns(waiting=waiting, terminated=None, running=None)
         last_terminated = ns(reason="OOMKilled", message=None, exit_code=137, signal=None, finished_at=datetime(2026, 7, 20, tzinfo=timezone.utc))
@@ -707,7 +710,10 @@ class ManifestCollectionTests(unittest.TestCase):
     def test_manifest_carries_the_same_workload_alias_the_pod_reports(self):
         """Without this the platform cannot tell which manifest belongs to a failing pod."""
         item = self._manifest(self.collector, "ReplicaSet", self._replicaset())
-        pod_workload = self.collector.alias("workload", "krevo-demo/ReplicaSet/payment-gateway-76dccd59c6")
+        pod_workload = self.collector.object_name(
+            "workload", "payment-gateway-76dccd59c6",
+            alias_key="krevo-demo/ReplicaSet/payment-gateway-76dccd59c6",
+        )
         self.assertEqual(item["workload_ref"], pod_workload)
 
     def test_manifest_records_owner_so_the_platform_can_reach_the_deployment(self):
