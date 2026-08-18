@@ -193,7 +193,13 @@ def run() -> None:
     if len(hash_salt) < 16:
         raise RuntimeError("HASH_SALT must contain at least 16 characters")
 
+    # 60s suits clusters up to a few hundred nodes. Above that, raise it: every cycle costs
+    # roughly 20 list calls against the customer's API server, and that load lands on their
+    # control plane, not on this pod's CPU limit. 120-300s is a better default at scale.
     interval = positive_int("INTERVAL_SECONDS", 60, 3600)
+    # How many cycles between rescans of slow-changing cluster facts (installed platform
+    # components, StorageClasses, IngressClasses). 10 cycles at the default interval is ~10 min.
+    slow_refresh_cycles = positive_int("SLOW_REFRESH_CYCLES", 10, 240)
     max_pods = positive_int("MAX_PODS", 150, 500)
     max_events = positive_int("MAX_EVENTS", 60, 200)
     verify_tls = os.getenv("VERIFY_TLS", "true").lower() == "true"
@@ -246,6 +252,7 @@ def run() -> None:
         manifest_secret_metadata=manifest_secret_metadata,
         manifest_configmap_values=manifest_configmap_values,
         manifest_real_names=manifest_real_names,
+        slow_refresh_cycles=slow_refresh_cycles,
     )
     session = requests.Session()
     identity_source, identity_scheme = stable_cluster_identity_source(collector, cluster_name)
@@ -254,10 +261,11 @@ def run() -> None:
     failures = 0
 
     logger.info(
-        "Agent %s started; kubernetes_config=%s interval=%ss command_poll=%ss max_pods=%s max_events=%s preserve_namespaces=%s event_message_mode=%s logs_enabled=%s log_storage_mode=%s external_log_source=%s manifests_enabled=%s max_manifests=%s",
+        "Agent %s started; kubernetes_config=%s interval=%ss slow_refresh=%s cycles command_poll=%ss max_pods=%s max_events=%s preserve_namespaces=%s event_message_mode=%s logs_enabled=%s log_storage_mode=%s external_log_source=%s manifests_enabled=%s max_manifests=%s",
         AGENT_VERSION,
         config_source,
         interval,
+        slow_refresh_cycles,
         command_poll_seconds,
         max_pods,
         max_events,

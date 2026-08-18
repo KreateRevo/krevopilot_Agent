@@ -191,6 +191,7 @@ class ClusterCollector:
         manifest_secret_metadata: bool = True,
         manifest_configmap_values: bool = False,
         manifest_real_names: bool = True,
+        slow_refresh_cycles: int = 10,
     ):
         self.hash_salt = hash_salt
         self.max_pods = max(1, min(max_pods, 500))
@@ -229,6 +230,12 @@ class ClusterCollector:
         self.storage_api = client.StorageV1Api()
         self.metrics = client.CustomObjectsApi()
         self.pod_lookup: dict[str, dict[str, Any]] = {}
+        # Platform components, StorageClasses and IngressClasses change on the timescale of a
+        # cluster upgrade, not a poll interval. Re-scanning them every cycle spent API-server
+        # work on an answer that is almost always identical to the last one.
+        self.slow_refresh_cycles = max(1, min(int(slow_refresh_cycles or 10), 240))
+        self._cycle = 0
+        self._environment_cache: dict[str, Any] | None = None
 
     def alias(self, kind: str, value: str | None) -> str:
         return alias_identifier(self.hash_salt, kind, value)
@@ -263,7 +270,9 @@ class ClusterCollector:
         platform = self._detect_platform(raw_nodes)
         metrics = self._collect_metrics()
         manifests, manifest_redactions = self._collect_manifests(pods) if self.manifests_enabled else ([], 0)
-        environment = self._collect_environment()
+        # Cheap on every cycle after the first: the scan itself only runs every
+        # slow_refresh_cycles, and a newly installed component appears within that window.
+        environment = self._environment_snapshot()
         external_log_status = self._external_log_status()
         redactions += pod_redactions + event_redactions + manifest_redactions
 
@@ -314,7 +323,7 @@ class ClusterCollector:
                 "workload_manifests",
                 "container_status",
                 "resource_metrics",
-            ],
+            ] + (["legacy_identity_bridge"] if self.manifest_real_names else []),
             "summary": {
                 "pods_observed": len(pods),
                 "warning_events_observed": len(events),
@@ -333,13 +342,13 @@ class ClusterCollector:
         cleaned, final_redactions = sanitize_value(signals)
         return cleaned, redactions + final_redactions
 
-    def _replica_set_owner_index(self) -> dict[tuple[str, str], tuple[str, str]]:
+    def _replica_set_owner_index(self) -> dict[tuple[str, str], tuple[str, str, str | None]]:
         """Maps (namespace, replicaset_name) -> (owner_kind, owner_name), so pods owned by a
         ReplicaSet can resolve up to the real Deployment. Best-effort: replicasets RBAC is only
         granted when manifests are enabled on older installs, so this must never break pod
         collection if the list call is forbidden or otherwise fails.
         """
-        index: dict[tuple[str, str], tuple[str, str]] = {}
+        index: dict[tuple[str, str], tuple[str, str, str | None]] = {}
         try:
             replica_sets = self.apps.list_replica_set_for_all_namespaces(watch=False, limit=self.max_manifests).items
         except Exception as exc:
@@ -349,10 +358,12 @@ class ClusterCollector:
             owners = replica_set.metadata.owner_references or []
             owner = next((item for item in owners if getattr(item, "controller", False)), owners[0] if owners else None)
             if owner:
-                index[(replica_set.metadata.namespace, replica_set.metadata.name)] = (owner.kind, owner.name)
+                index[(replica_set.metadata.namespace, replica_set.metadata.name)] = (
+                    owner.kind, owner.name, getattr(owner, "uid", None)
+                )
         return index
 
-    def _collect_pods(self, rs_owner_index: dict[tuple[str, str], tuple[str, str]] | None = None) -> tuple[list[dict[str, Any]], int]:
+    def _collect_pods(self, rs_owner_index: dict[tuple[str, str], tuple[str, str, str | None]] | None = None) -> tuple[list[dict[str, Any]], int]:
         rs_owner_index = rs_owner_index or {}
         items = self.core.list_pod_for_all_namespaces(watch=False, limit=self.max_pods).items
         result = []
@@ -365,6 +376,7 @@ class ClusterCollector:
             owner = next((item for item in owners if getattr(item, "controller", False)), owners[0] if owners else None)
             owner_name = getattr(owner, "name", None) or metadata.generate_name or metadata.name
             owner_kind = getattr(owner, "kind", None) or "Pod"
+            owner_uid = getattr(owner, "uid", None) or getattr(metadata, "uid", None)
 
             immediate_owner_kind = None
             immediate_owner_name = None
@@ -372,7 +384,7 @@ class ClusterCollector:
                 resolved = rs_owner_index.get((metadata.namespace, owner_name))
                 if resolved:
                     immediate_owner_kind, immediate_owner_name = owner_kind, owner_name
-                    owner_kind, owner_name = resolved
+                    owner_kind, owner_name, owner_uid = resolved
 
             spec_container_lookup = {item.name: item for item in (spec.containers or [])}
             init_spec_lookup = {item.name: item for item in (getattr(spec, "init_containers", None) or [])}
@@ -440,6 +452,7 @@ class ClusterCollector:
             pod_record = {
                 "workload": self.object_name("workload", owner_name, alias_key=f"{metadata.namespace}/{owner_kind}/{owner_name}"),
                 "workload_kind": owner_kind,
+                "workload_uid": owner_uid,
                 "namespace": namespace_value,
                 "pod": pod_alias,
                 "node": self.object_name("node", spec.node_name),
@@ -461,6 +474,14 @@ class ClusterCollector:
                 "priority_class_name": getattr(spec, "priority_class_name", None),
                 "restart_policy": getattr(spec, "restart_policy", None),
             }
+            # The platform used this HMAC identity before real Kubernetes names became the
+            # default. During the migration, real-name mode carries both values so historical
+            # samples can be joined without exposing anything that aliased mode did not already
+            # expose. Aliased mode intentionally remains byte-for-byte unchanged.
+            if self.manifest_real_names:
+                pod_record["workload_legacy_alias"] = self.alias(
+                    "workload", f"{metadata.namespace}/{owner_kind}/{owner_name}"
+                )
             if labels_raw:
                 pod_record["labels"] = self._redact_manifest_value(labels_raw)
             if annotations_raw:
@@ -570,12 +591,18 @@ class ClusterCollector:
         return {"state": "unknown"}
 
     def _collect_events(self) -> tuple[list[dict[str, Any]], int]:
-        # Kubernetes applies ``limit`` before the client can sort. Asking for only N arbitrary
-        # rows meant a busy cluster could hide its newest warning events behind older Normal
-        # events. Fetch the collection, sort warnings by occurrence time, then apply our bounded
-        # payload limit. The API response remains metadata-sized and the outbound snapshot is
-        # still capped by max_events.
-        items = self.core.list_event_for_all_namespaces(watch=False).items
+        # Kubernetes applies ``limit`` before the client can sort, so asking for N arbitrary rows
+        # could hide a busy cluster's newest warnings behind older Normal events. Rather than
+        # accept that trade-off, filter server-side: type=Warning discards the Normal events -
+        # the overwhelming majority on any active cluster - before they are ever serialised, so
+        # the sort below still sees every warning that exists.
+        #
+        # resource_version="0" serves the read from the API server's watch cache instead of a
+        # quorum read against etcd. Momentarily stale data is irrelevant to an agent that polls
+        # once a minute, and it removes the single most expensive read this agent performs.
+        items = self.core.list_event_for_all_namespaces(
+            watch=False, field_selector="type=Warning", resource_version="0",
+        ).items
         warnings = [item for item in items if item.type == "Warning"]
         warnings.sort(key=lambda item: self._event_time(item) or "", reverse=True)
         result = []
@@ -639,7 +666,7 @@ class ClusterCollector:
         Best-effort: a cluster may deny node list to a namespaced agent, and that must not break
         the rest of the snapshot."""
         try:
-            return list(self.core.list_node(watch=False).items)
+            return list(self.core.list_node(watch=False, resource_version="0").items)
         except Exception as exc:
             logger.info("Node list unavailable (RBAC or API error): %s", type(exc).__name__)
             return []
@@ -877,6 +904,18 @@ class ClusterCollector:
         ("gatekeeper", "OPA Gatekeeper"),
     )
 
+    def _environment_snapshot(self) -> dict[str, Any]:
+        """Return the component scan, refreshing it only every slow_refresh_cycles.
+
+        The cached value is returned verbatim in between, so the snapshot shape never changes -
+        consumers cannot tell a cached cycle from a fresh one.
+        """
+        self._cycle += 1
+        due = self._environment_cache is None or (self._cycle % self.slow_refresh_cycles) == 1
+        if due or self.slow_refresh_cycles == 1:
+            self._environment_cache = self._collect_environment()
+        return self._environment_cache
+
     def _collect_environment(self) -> dict[str, Any]:
         """Which well-known platform components actually run in this cluster.
 
@@ -894,7 +933,7 @@ class ClusterCollector:
         services_scanned = False
         services_scan_reason: str | None = None
         try:
-            for service in self.core.list_service_for_all_namespaces(watch=False).items:
+            for service in self.core.list_service_for_all_namespaces(watch=False, resource_version="0").items:
                 metadata = service.metadata
                 labels = metadata.labels or {}
                 candidates = " ".join(str(value) for value in (
@@ -1060,6 +1099,11 @@ class ClusterCollector:
             # matched to the pod it belongs to. Both sides go through object_name, so they agree
             # in real-name mode and in aliased mode alike.
             item["workload_ref"] = self.object_name("workload", name, alias_key=f"{namespace}/{kind}/{name}")
+            if self.manifest_real_names:
+                # Temporary migration bridge. Keep through at least two published agent
+                # releases after the SaaS identity merge is live, then remove only after
+                # telemetry confirms no supported agent still depends on it.
+                item["workload_legacy_alias"] = self.alias("workload", f"{namespace}/{kind}/{name}")
         # The owner lets the platform walk ReplicaSet -> Deployment, which is the object an
         # engineer actually edits: a change to the ReplicaSet is reverted by its Deployment.
         owner = self._manifest_owner(metadata)
@@ -1074,11 +1118,14 @@ class ClusterCollector:
             if not kind or not name:
                 continue
             namespace = metadata.get("namespace")
-            return {
+            owner = {
                 "kind": kind,
                 "name": self._manifest_name(str(kind).lower(), name),
                 "workload_ref": self.object_name("workload", name, alias_key=f"{namespace}/{kind}/{name}"),
             }
+            if self.manifest_real_names:
+                owner["workload_legacy_alias"] = self.alias("workload", f"{namespace}/{kind}/{name}")
+            return owner
         return None
 
     def _manifest_name(self, kind: str, value: str | None) -> str:

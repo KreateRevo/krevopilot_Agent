@@ -541,8 +541,25 @@ class CollectorTests(unittest.TestCase):
         self.assertIn("internal.note", pod["annotation_keys"])
         self.assertEqual(pod["revision_annotations"], {"deployment.kubernetes.io/revision": "7"})
 
+    def test_real_name_mode_emits_legacy_identity_bridge(self):
+        self.collector.manifest_real_names = True
+        signals, _redactions = self.collector.collect()
+        pod = signals["pods"][0]
+        self.assertIn("legacy_identity_bridge", signals["capabilities"])
+        self.assertEqual(
+            pod["workload_legacy_alias"],
+            self.collector.alias("workload", "production/ReplicaSet/customer-api-7d9"),
+        )
+        self.assertEqual(pod["workload_uid"], "pod-uid-123")
+
+    def test_aliased_mode_does_not_change_payload_shape_for_bridge(self):
+        self.collector.manifest_real_names = False
+        signals, _redactions = self.collector.collect()
+        self.assertNotIn("legacy_identity_bridge", signals["capabilities"])
+        self.assertNotIn("workload_legacy_alias", signals["pods"][0])
+
     def test_replicaset_owner_resolves_to_deployment(self):
-        rs_owner = ns(name="customer-api", kind="Deployment", controller=True)
+        rs_owner = ns(name="customer-api", kind="Deployment", controller=True, uid="deployment-uid-456")
         replica_set = ns(metadata=ns(namespace="production", name="customer-api-7d9", owner_references=[rs_owner]))
         self.collector.apps.list_replica_set_for_all_namespaces.return_value = ns(items=[replica_set])
 
@@ -550,6 +567,7 @@ class CollectorTests(unittest.TestCase):
 
         pod = signals["pods"][0]
         self.assertEqual(pod["workload_kind"], "Deployment")
+        self.assertEqual(pod["workload_uid"], "deployment-uid-456")
         self.assertEqual(pod["immediate_owner_kind"], "ReplicaSet")
         self.assertIn("immediate_owner_name", pod)
 
@@ -680,6 +698,31 @@ class ManifestCollectionTests(unittest.TestCase):
         self.assertIn("checkout-secret", item["yaml"])
         self.assertNotIn("postgres://app:secret", item["yaml"])
         self.assertIn("REDACTED_ENV_VALUE", item["yaml"])
+
+    def test_real_name_manifest_carries_legacy_identity_bridge(self):
+        deployment = {
+            "apiVersion": "apps/v1", "kind": "Deployment",
+            "metadata": {
+                "name": "checkout-api", "namespace": "ecommerce",
+                "ownerReferences": [{"kind": "Application", "name": "shop"}],
+            },
+            "spec": {"template": {"spec": {"containers": []}}},
+        }
+        self.collector.manifest_real_names = True
+        self.collector.api_client = Mock()
+        self.collector.api_client.sanitize_for_serialization.return_value = deployment
+
+        item, _redactions = self.collector._manifest_item("Deployment", object())
+
+        self.assertEqual(item["workload_ref"], "checkout-api")
+        self.assertEqual(
+            item["workload_legacy_alias"],
+            self.collector.alias("workload", "ecommerce/Deployment/checkout-api"),
+        )
+        self.assertEqual(
+            item["owner"]["workload_legacy_alias"],
+            self.collector.alias("workload", "ecommerce/Application/shop"),
+        )
 
     def _manifest(self, collector, kind, raw):
         collector.api_client = Mock()
