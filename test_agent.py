@@ -609,6 +609,49 @@ class CollectorTests(unittest.TestCase):
 
         self.assertEqual(signals["warning_events"][0]["object_name"], signals["pods"][0]["workload"])
 
+    def test_replicaset_failed_create_event_resolves_to_deployment(self):
+        rs_owner = ns(name="missing-serviceaccount", kind="Deployment", controller=True, uid="deployment-uid")
+        replica_set = ns(
+            metadata=ns(
+                namespace="failure-scenarios",
+                name="missing-serviceaccount-7d9f6c9cbd",
+                owner_references=[rs_owner],
+            )
+        )
+        self.collector.apps.list_replica_set_for_all_namespaces.return_value = ns(items=[replica_set])
+        self.event.reason = "FailedCreate"
+        self.event.message = (
+            'error looking up service account failure-scenarios/missing-sa: '
+            'serviceaccount "missing-sa" not found'
+        )
+        self.event.involved_object = ns(
+            name="missing-serviceaccount-7d9f6c9cbd",
+            namespace="failure-scenarios",
+            kind="ReplicaSet",
+        )
+
+        signals, _redactions = self.collector.collect()
+
+        event = signals["warning_events"][0]
+        self.assertEqual(event["workload_kind"], "Deployment")
+        self.assertEqual(event["missing_reference"], {"kind": "ServiceAccount", "name": "missing-sa"})
+        self.assertEqual(
+            event["workload"],
+            self.collector.alias(
+                "workload",
+                "failure-scenarios/Deployment/missing-serviceaccount",
+            ),
+        )
+
+    def test_missing_reference_is_structured_before_quoted_text_redaction(self):
+        self.event.message = 'Error: configmap "app-config" not found'
+
+        signals, _redactions = self.collector.collect()
+
+        event = signals["warning_events"][0]
+        self.assertEqual(event["missing_reference"], {"kind": "ConfigMap", "name": "app-config"})
+        self.assertNotIn("app-config", event["message"])
+
     def test_event_object_name_matches_node_alias(self):
         involved = ns(name="node-private-1", namespace="", kind="Node")
         self.event.involved_object = involved

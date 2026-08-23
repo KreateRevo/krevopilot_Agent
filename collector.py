@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urljoin
@@ -12,7 +13,7 @@ from kubernetes.config.config_exception import ConfigException
 from privacy import alias_identifier, sanitize_value, scrub_log_text, scrub_text
 
 logger = logging.getLogger("krevopilot.collector")
-AGENT_VERSION = "2.0.31"
+AGENT_VERSION = "2.0.32"
 HELM_CHART_VERSION = os.getenv("HELM_CHART_VERSION", "").strip()
 HELM_RELEASE_NAME = os.getenv("HELM_RELEASE_NAME", "").strip()
 HELM_RELEASE_NAMESPACE = os.getenv("HELM_RELEASE_NAMESPACE", "").strip()
@@ -264,7 +265,7 @@ class ClusterCollector:
         self.pod_lookup = {}
         rs_owner_index = self._replica_set_owner_index()
         pods, pod_redactions = self._collect_pods(rs_owner_index)
-        events, event_redactions = self._collect_events()
+        events, event_redactions = self._collect_events(rs_owner_index)
         raw_nodes = self._list_nodes()
         nodes = self._collect_nodes(raw_nodes)
         platform = self._detect_platform(raw_nodes)
@@ -598,7 +599,36 @@ class ClusterCollector:
             return result
         return {"state": "unknown"}
 
-    def _collect_events(self) -> tuple[list[dict[str, Any]], int]:
+    _MISSING_REFERENCE_PATTERNS = (
+        ("ConfigMap", re.compile(r'configmap\s+["\']([^"\']+)["\']\s+not found', re.IGNORECASE)),
+        ("Secret", re.compile(r'secret\s+["\']([^"\']+)["\']\s+not found', re.IGNORECASE)),
+        (
+            "ServiceAccount",
+            re.compile(
+                r'(?:serviceaccount|service account)(?:\s+[\w.-]+/)?\s*["\']?([^"\'\s:]+)["\']?\s+not found',
+                re.IGNORECASE,
+            ),
+        ),
+    )
+
+    @classmethod
+    def _missing_reference(cls, message: str | None) -> dict[str, str] | None:
+        """Extract an actionable missing Kubernetes object before free-text redaction.
+
+        The structured name is safe to sanitize independently and avoids making diagnosis rely
+        on quoted text, which the privacy scrubber intentionally removes.
+        """
+        text = str(message or "")
+        for kind, pattern in cls._MISSING_REFERENCE_PATTERNS:
+            match = pattern.search(text)
+            if match:
+                return {"kind": kind, "name": match.group(1)}
+        return None
+
+    def _collect_events(
+        self,
+        rs_owner_index: dict[tuple[str, str], tuple[str, str, str | None]] | None = None,
+    ) -> tuple[list[dict[str, Any]], int]:
         # Kubernetes applies ``limit`` before the client can sort, so asking for N arbitrary rows
         # could hide a busy cluster's newest warnings behind older Normal events. Rather than
         # accept that trade-off, filter server-side: type=Warning discards the Normal events -
@@ -615,11 +645,12 @@ class ClusterCollector:
         warnings.sort(key=lambda item: self._event_time(item) or "", reverse=True)
         result = []
         redactions = 0
+        rs_owner_index = rs_owner_index or {}
         for event in warnings[: self.max_events]:
             involved = event.involved_object
             message, count = self._event_message(event, involved)
             redactions += count + 3
-            result.append({
+            event_row = {
                 "reason": event.reason,
                 "message": message[:2000],
                 "object": self.alias("object", f"{involved.kind}/{involved.namespace}/{involved.name}"),
@@ -629,7 +660,24 @@ class ClusterCollector:
                 "count": int(event.count or 1),
                 "first_seen": self._event_time(event, prefer_first=True),
                 "last_seen": self._event_time(event),
-            })
+            }
+            missing_reference = self._missing_reference(getattr(event, "message", None))
+            if missing_reference:
+                event_row["missing_reference"] = missing_reference
+
+            # FailedCreate is attached to a ReplicaSet when a Deployment cannot create a pod.
+            # Resolve it to the Deployment so Krevo AI can select the exact editable workload.
+            if involved.kind == "ReplicaSet":
+                resolved = rs_owner_index.get((involved.namespace, involved.name))
+                if resolved:
+                    owner_kind, owner_name, _owner_uid = resolved
+                    event_row["workload_kind"] = owner_kind
+                    event_row["workload"] = self.object_name(
+                        "workload",
+                        owner_name,
+                        alias_key=f"{involved.namespace}/{owner_kind}/{owner_name}",
+                    )
+            result.append(event_row)
         return result, redactions
 
     def _event_object_name(self, involved: Any) -> str | None:
