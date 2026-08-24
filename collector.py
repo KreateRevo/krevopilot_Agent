@@ -13,7 +13,7 @@ from kubernetes.config.config_exception import ConfigException
 from privacy import alias_identifier, sanitize_value, scrub_log_text, scrub_text
 
 logger = logging.getLogger("krevopilot.collector")
-AGENT_VERSION = "2.0.32"
+AGENT_VERSION = "2.0.33"
 HELM_CHART_VERSION = os.getenv("HELM_CHART_VERSION", "").strip()
 HELM_RELEASE_NAME = os.getenv("HELM_RELEASE_NAME", "").strip()
 HELM_RELEASE_NAMESPACE = os.getenv("HELM_RELEASE_NAMESPACE", "").strip()
