@@ -20,6 +20,13 @@ rules:
   - apiGroups: ["metrics.k8s.io"]
     resources: ["pods", "nodes"]
     verbs: ["get", "list"]
+  {{- if .Values.advancedMetrics.enabled }}
+  # Optional kubelet-summary collection. Disabled by default because nodes/proxy
+  # is a broader permission than the standard read-focused collector needs.
+  - apiGroups: [""]
+    resources: ["nodes/proxy"]
+    verbs: ["get"]
+  {{- end }}
   - apiGroups: ["apps"]
     resources:
       - replicasets
@@ -60,6 +67,12 @@ rules:
   - apiGroups: ["storage.k8s.io"]
     resources:
       - storageclasses
+      - csidrivers
+    verbs: ["get", "list"]
+  - apiGroups: ["admissionregistration.k8s.io"]
+    resources:
+      - validatingwebhookconfigurations
+      - mutatingwebhookconfigurations
     verbs: ["get", "list"]
   - apiGroups: ["route.openshift.io"]
     resources:

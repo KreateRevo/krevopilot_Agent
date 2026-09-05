@@ -205,7 +205,7 @@ helm install krevopilot-agent ./krevopilot-agent-0.1.0.tgz \
   --create-namespace \
   --set platform.url="https://pilot.yourcompany.com" \
   --set cluster.id="customer-prod-cluster" \
-  --set agent.key="paste-agent-key-from-kreaterevopilot"
+  --set agent.key="paste-agent-key-from-krevopilot"
 ```
 
 For local development without the public Helm repo:
@@ -216,7 +216,7 @@ helm upgrade --install krevopilot-agent ./charts/krevopilot-agent \
   --create-namespace \
   --set platform.url="http://host.docker.internal:8000" \
   --set cluster.id="local-test" \
-  --set agent.key="paste-agent-key-from-kreaterevopilot" \
+  --set agent.key="paste-agent-key-from-krevopilot" \
   --set agent.allowInsecureHttp=true \
   --set image.repository="mani7022/krevopilot-agent" \
   --set image.tag="2.0.25"
@@ -235,7 +235,7 @@ helm install krevopilot-agent kreate-revo/krevopilot-agent \
   --create-namespace \
   --set platform.url="https://pilot.yourcompany.com" \
   --set cluster.id="customer-prod-cluster" \
-  --set agent.key="paste-agent-key-from-kreaterevopilot"
+  --set agent.key="paste-agent-key-from-krevopilot"
 ```
 
 If your image is hosted somewhere else:
@@ -246,7 +246,7 @@ helm install krevopilot-agent kreate-revo/krevopilot-agent \
   --create-namespace \
   --set platform.url="https://pilot.yourcompany.com" \
   --set cluster.id="customer-prod-cluster" \
-  --set agent.key="paste-agent-key-from-kreaterevopilot" \
+  --set agent.key="paste-agent-key-from-krevopilot" \
   --set image.repository="mani7022/krevopilot-agent" \
   --set image.tag="2.0.25"
 ```
@@ -263,7 +263,7 @@ cluster:
   id: customer-prod-cluster
 
 agent:
-  key: paste-agent-key-from-kreaterevopilot
+  key: paste-agent-key-from-krevopilot
 
 image:
   repository: mani7022/krevopilot-agent
@@ -287,7 +287,7 @@ Use this when the customer does not use Helm.
 .\scripts\install.ps1 `
   -PlatformUrl "https://pilot.yourcompany.com" `
   -ClusterId "customer-prod-cluster" `
-  -AgentKey "paste-agent-key-from-kreaterevopilot" `
+  -AgentKey "paste-agent-key-from-krevopilot" `
   -Image "mani7022/krevopilot-agent:2.0.25"
 ```
 
@@ -296,7 +296,7 @@ Use this when the customer does not use Helm.
 ```bash
 export PLATFORM_URL="https://pilot.yourcompany.com"
 export CLUSTER_ID="customer-prod-cluster"
-export AGENT_KEY="paste-agent-key-from-kreaterevopilot"
+export AGENT_KEY="paste-agent-key-from-krevopilot"
 export IMAGE="mani7022/krevopilot-agent:2.0.25"
 
 sh ./scripts/install.sh
@@ -312,7 +312,7 @@ PowerShell:
 .\scripts\install.ps1 `
   -PlatformUrl "https://pilot.yourcompany.com" `
   -ClusterId "customer-prod-cluster" `
-  -AgentKey "paste-agent-key-from-kreaterevopilot" `
+  -AgentKey "paste-agent-key-from-krevopilot" `
   -Image "mani7022/krevopilot-agent:2.0.25" `
   -ManifestUrl "https://raw.githubusercontent.com/KreateRevo/krevopilot-agent/main/kubernetes.yaml"
 ```
@@ -322,7 +322,7 @@ macOS/Linux:
 ```bash
 export PLATFORM_URL="https://pilot.yourcompany.com"
 export CLUSTER_ID="customer-prod-cluster"
-export AGENT_KEY="paste-agent-key-from-kreaterevopilot"
+export AGENT_KEY="paste-agent-key-from-krevopilot"
 export IMAGE="mani7022/krevopilot-agent:2.0.25"
 export MANIFEST_URL="https://raw.githubusercontent.com/KreateRevo/krevopilot-agent/main/kubernetes.yaml"
 

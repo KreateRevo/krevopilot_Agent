@@ -2,7 +2,7 @@ replicaCount: 1
 
 image:
   repository: mani7022/krevopilot-agent
-  tag: "2.0.33"
+  tag: "2.0.43"
   # Optional immutable image digest, for example sha256:...
   digest: ""
   pullPolicy: IfNotPresent
@@ -41,6 +41,22 @@ agent:
   # summary sends reason/kind only. none sends no event message text.
   eventMessageMode: scrubbed
 
+diagnostics:
+  # Opt-in safe active verification for Krevo AI investigations. The agent accepts only
+  # namespace-local DNS, TCP, HTTP, and TLS checks with bounded timeouts; no shell commands,
+  # manifest mutations, Secret values, or arbitrary Internet destinations are permitted.
+  enabled: false
+
+advancedMetrics:
+  # Optional, bounded node telemetry for actual CPU throttling, pod network errors/drops,
+  # and PVC filesystem fullness. Disabled by default: existing installs make no node-proxy
+  # calls and receive no additional RBAC unless this is explicitly enabled.
+  enabled: false
+  intervalSeconds: 300
+  maxNodes: 10
+  timeoutSeconds: 5
+  maxResponseBytes: 4000000
+
 logs:
   # Enables future on-demand log requests. Regular snapshots still do not send logs.
   enabled: false
@@ -68,9 +84,10 @@ externalLogSource:
 manifests:
   # Sends redacted Kubernetes resource specs for investigation. This is read-only.
   enabled: true
-  maxItems: 80
+  maxItems: 300
   maxYamlChars: 12000
-  # Secret values are never collected. This only sends Secret metadata/type/key counts.
+  # Secret values are never collected. This sends only Secret metadata/type/key names so
+  # missing-key references can be diagnosed without exposing credentials.
   secretMetadata: true
   # Keep false for production privacy. When false, ConfigMaps send key names only.
   configMapValues: false
@@ -128,3 +145,6 @@ networkPolicy:
   # KrevoPilot endpoint and DNS if your CNI enforces egress policies.
   egressCidrs: []
   allowDns: true
+  # When diagnostics.enabled and NetworkPolicy are both enabled, list the cluster Service CIDR
+  # (for example 10.96.0.0/12). This allows the agent to reach namespace-local ClusterIP services.
+  diagnosticServiceCidrs: []

@@ -1,3 +1,9 @@
+{{- $secretName := .Values.agent.existingSecret | default (include "krevopilot-agent.secretName" .) -}}
+{{- $existingAgentSecret := lookup "v1" "Secret" .Release.Namespace $secretName -}}
+{{- $agentKeyChecksum := .Values.agent.key | default "" -}}
+{{- if and (not $agentKeyChecksum) $existingAgentSecret (index $existingAgentSecret.data "agent-key") -}}
+{{- $agentKeyChecksum = (index $existingAgentSecret.data "agent-key") -}}
+{{- end -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -25,7 +31,7 @@ spec:
         # by hand. Only the key is hashed, not the rendered Secret: that template also
         # generates a random hash salt, which would make the checksum differ on every
         # render and restart the agent for no reason.
-        checksum/agent-key: {{ .Values.agent.key | default "" | sha256sum }}
+        checksum/agent-key: {{ $agentKeyChecksum | sha256sum }}
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -87,6 +93,18 @@ spec:
               value: {{ .Values.agent.eventMessageMode | quote }}
             - name: LOGS_ENABLED
               value: {{ default false (get (default dict .Values.logs) "enabled") | quote }}
+            - name: DIAGNOSTIC_ACTIONS_ENABLED
+              value: {{ default false (get (default dict .Values.diagnostics) "enabled") | quote }}
+            - name: ADVANCED_METRICS_ENABLED
+              value: {{ default false (get (default dict .Values.advancedMetrics) "enabled") | quote }}
+            - name: ADVANCED_METRICS_INTERVAL_SECONDS
+              value: {{ default 300 (get (default dict .Values.advancedMetrics) "intervalSeconds") | quote }}
+            - name: ADVANCED_METRICS_MAX_NODES
+              value: {{ default 10 (get (default dict .Values.advancedMetrics) "maxNodes") | quote }}
+            - name: ADVANCED_METRICS_TIMEOUT_SECONDS
+              value: {{ default 5 (get (default dict .Values.advancedMetrics) "timeoutSeconds") | quote }}
+            - name: ADVANCED_METRICS_MAX_RESPONSE_BYTES
+              value: {{ printf "%.0f" (float64 (default 4000000 (get (default dict .Values.advancedMetrics) "maxResponseBytes"))) | quote }}
             - name: LOGS_MAX_LINES
               value: {{ default 500 (get (default dict .Values.logs) "maxLines") | quote }}
             - name: LOGS_MAX_LOOKBACK_MINUTES
@@ -128,7 +146,7 @@ spec:
             - name: MANIFESTS_ENABLED
               value: {{ include "krevopilot-agent.bool" (list .Values.manifests "enabled" true) | quote }}
             - name: MAX_MANIFESTS
-              value: {{ default 80 (get (default dict .Values.manifests) "maxItems") | quote }}
+              value: {{ default 300 (get (default dict .Values.manifests) "maxItems") | quote }}
             - name: MANIFEST_MAX_YAML_CHARS
               value: {{ default 12000 (get (default dict .Values.manifests) "maxYamlChars") | quote }}
             - name: MANIFEST_SECRET_METADATA

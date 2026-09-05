@@ -2,8 +2,8 @@ apiVersion: v2
 name: krevopilot-agent
 description: Read-only Kubernetes agent for KrevoPilot - collects workload health, warning events, node signals and Metrics Server usage for AI incident investigation and resource rightsizing
 type: application
-version: 0.1.33
-appVersion: "2.0.33"
+version: 0.1.45
+appVersion: "2.0.43"
 home: https://krevopilot.com
 sources:
   - https://github.com/KreateRevo/krevopilot_Agent

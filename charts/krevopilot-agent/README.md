@@ -10,7 +10,7 @@ helm install krevopilot-agent ./charts/krevopilot-agent \
   --create-namespace \
   --set platform.url="https://pilot.yourcompany.com" \
   --set cluster.id="customer-prod-cluster" \
-  --set agent.key="paste-agent-key-from-kreaterevopilot"
+  --set agent.key="paste-agent-key-from-krevopilot"
 ```
 
 ## Install from a published chart repo
@@ -26,7 +26,7 @@ helm install krevopilot-agent kreate-revo/krevopilot-agent \
   --create-namespace \
   --set platform.url="https://pilot.yourcompany.com" \
   --set cluster.id="customer-prod-cluster" \
-  --set agent.key="paste-agent-key-from-kreaterevopilot"
+  --set agent.key="paste-agent-key-from-krevopilot"
 ```
 
 If `helm repo add` returns `404 Not Found`, the public Helm repository is not enabled yet. For internal/local testing from this repository, use:
@@ -37,7 +37,7 @@ helm upgrade --install krevopilot-agent ./charts/krevopilot-agent \
   --create-namespace \
   --set platform.url="http://host.docker.internal:8000" \
   --set cluster.id="local-test" \
-  --set agent.key="paste-agent-key-from-kreaterevopilot" \
+  --set agent.key="paste-agent-key-from-krevopilot" \
   --set agent.allowInsecureHttp=true
 ```
 
@@ -53,7 +53,7 @@ cluster:
   id: customer-prod-cluster
 
 agent:
-  key: paste-agent-key-from-kreaterevopilot
+  key: paste-agent-key-from-krevopilot
   preserveNamespaces: true
   eventMessageMode: scrubbed
 
@@ -79,7 +79,7 @@ Use this when namespace names or event message text are considered sensitive:
 
 ```yaml
 agent:
-  key: paste-agent-key-from-kreaterevopilot
+  key: paste-agent-key-from-krevopilot
   preserveNamespaces: false
   eventMessageMode: summary # scrubbed | summary | none
 

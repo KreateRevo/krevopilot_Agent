@@ -3,7 +3,7 @@ set -eu
 
 : "${PLATFORM_URL:?Set PLATFORM_URL, for example https://pilot.yourcompany.com}"
 : "${CLUSTER_ID:?Set CLUSTER_ID, for example prod-cluster-1}"
-: "${AGENT_KEY:?Set AGENT_KEY from KreateRevoPilot}"
+: "${AGENT_KEY:?Set AGENT_KEY from KrevoPilot}"
 
 NAMESPACE="${NAMESPACE:-krevopilot-system}"
 IMAGE="${IMAGE:-mani7022/krevopilot-agent:2.0.33}"
