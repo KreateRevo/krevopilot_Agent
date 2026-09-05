@@ -12,7 +12,7 @@ nameOverride: ""
 fullnameOverride: ""
 
 platform:
-  # KreateRevoPilot URL, for example https://pilot.yourcompany.com
+  # KrevoPilot URL, for example https://pilot.yourcompany.com
   url: ""
 
 cluster:
@@ -20,7 +20,7 @@ cluster:
   id: ""
 
 agent:
-  # Cluster connection key generated in KreateRevoPilot.
+  # Cluster connection key generated in KrevoPilot.
   key: ""
   # Optional. If empty, Helm creates or reuses a random salt in the Secret.
   hashSalt: ""

@@ -1,6 +1,6 @@
-# KreateRevoPilot Agent Helm Chart
+# KrevoPilot Agent Helm Chart
 
-Install the KreateRevoPilot Agent into a Kubernetes cluster.
+Install the KrevoPilot Agent into a Kubernetes cluster.
 
 ## Install
 

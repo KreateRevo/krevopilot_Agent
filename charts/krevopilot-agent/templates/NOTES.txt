@@ -1,4 +1,4 @@
-KreateRevoPilot Agent is being installed.
+KrevoPilot Agent is being installed.
 
 Check rollout:
   kubectl rollout status deployment/{{ include "krevopilot-agent.fullname" . }} -n {{ .Release.Namespace }}
@@ -10,6 +10,6 @@ Expected successful log:
   Snapshot accepted id=...
 
 If the pod cannot start, verify:
-  - platform.url points to your KreateRevoPilot URL
-  - agent.key matches the cluster connection key generated in KreateRevoPilot
-  - the customer cluster can reach {{ .Values.platform.url | default "your KreateRevoPilot URL" }}
+  - platform.url points to your KrevoPilot URL
+  - agent.key matches the cluster connection key generated in KrevoPilot
+  - the customer cluster can reach {{ .Values.platform.url | default "your KrevoPilot URL" }}

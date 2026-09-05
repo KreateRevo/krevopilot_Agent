@@ -1,15 +1,15 @@
-# KreateRevoPilot Agent
+# KrevoPilot Agent
 
-Standalone Kubernetes agent for KreateRevoPilot.
+Standalone Kubernetes agent for KrevoPilot.
 
-Install this agent inside a customer Kubernetes cluster to send privacy-safe workload health, warning events, node signals, and optional Metrics Server usage back to KreateRevoPilot.
+Install this agent inside a customer Kubernetes cluster to send privacy-safe workload health, warning events, node signals, and optional Metrics Server usage back to KrevoPilot.
 
-The agent is separate from the KreateRevoPilot app:
+The agent is separate from the KrevoPilot app:
 
-- KreateRevoPilot runs as your platform.
-- KreateRevoPilot Agent runs inside each customer cluster.
-- The agent sends outbound HTTPS reports to KreateRevoPilot.
-- KreateRevoPilot uses those reports for Applications, Cost Optimization, and AI Assistant evidence.
+- KrevoPilot runs as your platform.
+- KrevoPilot Agent runs inside each customer cluster.
+- The agent sends outbound HTTPS reports to KrevoPilot.
+- KrevoPilot uses those reports for Applications, Cost Optimization, and AI Assistant evidence.
 
 ## What the agent collects
 
@@ -107,13 +107,13 @@ agent:
 | `agent.py`, `collector.py`, `privacy.py` | Agent runtime |
 | `test_agent.py` | Unit tests |
 
-## For KreateRevoPilot owners
+## For KrevoPilot owners
 
-Before customers install the agent, prepare your KreateRevoPilot backend.
+Before customers install the agent, prepare your KrevoPilot backend.
 
 ### 1. Set the ingest key
 
-In your KreateRevoPilot backend environment, set:
+In your KrevoPilot backend environment, set:
 
 ```env
 AGENT_INGEST_KEY=replace-with-a-long-random-value
@@ -130,7 +130,7 @@ For local testing only, you can use:
 AGENT_REQUIRE_HTTPS=false
 ```
 
-### 2. Make KreateRevoPilot reachable
+### 2. Make KrevoPilot reachable
 
 Customers need a URL their cluster can reach, for example:
 
@@ -331,20 +331,20 @@ curl -fsSL https://raw.githubusercontent.com/KreateRevo/krevopilot-agent/main/sc
 
 The public source repository is `KreateRevo/krevopilot_Agent`.
 
-## Connect with KreateRevoPilot
+## Connect with KrevoPilot
 
 Use this checklist when onboarding a company:
 
-1. In KreateRevoPilot, generate or choose an `AGENT_INGEST_KEY`.
-2. Set that key on the KreateRevoPilot backend as `AGENT_INGEST_KEY`.
+1. In KrevoPilot, generate or choose an `AGENT_INGEST_KEY`.
+2. Set that key on the KrevoPilot backend as `AGENT_INGEST_KEY`.
 3. Give the company:
-   - KreateRevoPilot URL, for example `https://pilot.yourcompany.com`
+   - KrevoPilot URL, for example `https://pilot.yourcompany.com`
    - Agent key
    - Cluster ID they should use, for example `acme-prod-us-east`
    - Helm install command
    - Agent image, for example `mani7022/krevopilot-agent:2.0.25`
 4. Company runs the Helm install command in their Kubernetes cluster.
-5. In KreateRevoPilot, open:
+5. In KrevoPilot, open:
    - Overview
    - Applications
    - Cost Optimizer
@@ -425,9 +425,9 @@ sh ./scripts/uninstall.sh
 
 | Setting | Default | Meaning |
 | --- | ---: | --- |
-| `PLATFORM_URL` | required | KreateRevoPilot URL |
+| `PLATFORM_URL` | required | KrevoPilot URL |
 | `CLUSTER_ID` | required | Friendly customer cluster name |
-| `AGENT_KEY` | required | Must match KreateRevoPilot `AGENT_INGEST_KEY` |
+| `AGENT_KEY` | required | Must match KrevoPilot `AGENT_INGEST_KEY` |
 | `HASH_SALT` | generated | Used to create privacy-safe aliases |
 | `INTERVAL_SECONDS` | `60` | How often the agent reports |
 | `MAX_PODS` | `150` | Maximum pods included per report |
@@ -477,7 +477,7 @@ networkPolicy:
   enabled: true
   allowDns: true
   egressCidrs:
-    - "203.0.113.10/32" # replace with your KreateRevoPilot ingress/load balancer IP
+    - "203.0.113.10/32" # replace with your KrevoPilot ingress/load balancer IP
 ```
 
 Then install:
@@ -491,8 +491,8 @@ helm upgrade --install krevopilot-agent kreate-revo/krevopilot-agent \
 
 Notes:
 
-- Kubernetes NetworkPolicy cannot restrict egress by DNS name. Use the CIDR/IPs for your KreateRevoPilot ingress or load balancer.
-- The agent key is shown once by KreateRevoPilot. If it is lost, generate a new key and upgrade the agent.
+- Kubernetes NetworkPolicy cannot restrict egress by DNS name. Use the CIDR/IPs for your KrevoPilot ingress or load balancer.
+- The agent key is shown once by KrevoPilot. If it is lost, generate a new key and upgrade the agent.
 
 ## Build and test
 

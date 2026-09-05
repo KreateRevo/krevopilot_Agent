@@ -1,20 +1,48 @@
 apiVersion: v2
 name: krevopilot-agent
-description: KreateRevoPilot Agent for Kubernetes cluster health and workload signals
+description: Read-only Kubernetes agent for KrevoPilot - collects workload health, warning events, node signals and Metrics Server usage for AI incident investigation and resource rightsizing
 type: application
 version: 0.1.33
 appVersion: "2.0.33"
-home: https://github.com/KreateRevo/krevopilot_Agent
+home: https://krevopilot.com
 sources:
   - https://github.com/KreateRevo/krevopilot_Agent
 keywords:
   - kubernetes
-  - agent
+  - krevopilot
   - observability
+  - monitoring
+  - troubleshooting
+  - incident-response
+  - root-cause-analysis
+  - cost-optimization
+  - rightsizing
+  - finops
+  - sre
+  - devops
+  - ai
+  - agent
   - gitops
-  - kreate-revo
 maintainers:
-  - name: KreateRevo
+  - name: KreateRevo UG
+    url: https://krevopilot.com
+icon: https://krevopilot.com/kreaterevo-symbol.png
 annotations:
   artifacthub.io/category: monitoring-logging
   artifacthub.io/license: Proprietary
+  artifacthub.io/links: |
+    - name: Product
+      url: https://krevopilot.com
+    - name: Documentation
+      url: https://krevopilot.com/documentation.html
+    - name: Getting started
+      url: https://krevopilot.com/docs-getting-started.html
+    - name: Security and data handling
+      url: https://krevopilot.com/docs-security.html
+    - name: Agent RBAC reference
+      url: https://krevopilot.com/agent-rbac.html
+    - name: Source
+      url: https://github.com/KreateRevo/krevopilot_Agent
+  artifacthub.io/maintainers: |
+    - name: KreateRevo UG
+      email: support@krevopilot.com
